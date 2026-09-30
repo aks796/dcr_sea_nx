@@ -1,0 +1,17 @@
+build/
+*.nsp
+*.elf
+*.build
+launcher/build/
+launcher/romfs/
+launcher/*.nro
+launcher/*.nacp
+launcher/*.elf
+portlibs32/
+SD_CARD/
+SD_CARD.zip
+debug/
+.DS_Store
+mod/refs/
+mod/dcrmod.dll
+dcr.apk
