@@ -15,3 +15,11 @@ debug/
 mod/refs/
 mod/dcrmod.dll
 dcr.apk
+github_repo/
+template.md
+
+# the android32 runtime: a symlink while developing (a submodule in the GitHub export)
+/runtime
+# development links in a worktree
+/portlibs32
+/mod/refs

@@ -42,7 +42,7 @@
 #include "bionic.h"
 #include "bionic_pthread.h"
 #include "dcr_path.h"
-#include "jni.h"
+#include "dcr_jni_unity.h"
 #include "util.h"
 
 int b_pthread_create(b_pthread_t *out, const b_pthread_attr_t *attr, void *(*start)(void *), void *arg);

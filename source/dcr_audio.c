@@ -38,7 +38,7 @@
 #include <string.h>
 #include <switch.h>
 
-#include "jni.h"
+#include "dcr_jni_unity.h"
 #include "util.h"
 
 typedef struct {

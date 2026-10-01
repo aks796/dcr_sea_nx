@@ -278,75 +278,10 @@ void *jit_rw(const void *rx) {
 
 int jit_is_split(void) { return g_ready && g_rx != g_rw; }
 
-/* ------------------------------------------------------------------------
- * INSTRUCTION-CACHE MAINTENANCE
- * A 32-bit (AArch32) EL0 thread cannot run cache maintenance at all -- there
- * is no EL0 form of DCCMVAU / ICIMVAU in AArch32, which is why 32-bit Linux
- * has the cacheflush syscall -- and libnx32 defines armICacheInvalidate as
- * (void)0. So nothing invalidated the instruction cache, and freshly written
- * JIT code could run as whatever the I-cache had fetched there before. A
- * hardware run (2026-09-23) did exactly that: Mono called a method whose lines
- * the I-cache still held as the zeroes jit_alloc wrote, slid through them
- * (0x00000000 = andeq, a no-op) and hit the kernel's 0xFF fill of the next,
- * never-allocated page: undefined instruction 0xffffffff at a page boundary.
- *
- * The kernel invalidates EVERY core's instruction cache (IC IALLUIS plus an
- * instruction barrier on each core) whenever a Code / AliasCode page gains or
- * loses execute permission (KPageTableBase::SetProcessMemoryPermission). So a
- * dedicated page -- mapped with svcMapProcessCodeMemory, never executed -- is
- * flipped R <-> RX once per invalidation. (The arena's own rx view is CodeOut
- * memory, which has no FlagCode and cannot be flipped.) The data side is
- * cleaned first with svcFlushProcessDataCache on the written range, since the
- * I-cache refills from L2/memory, not from the L1 data cache. */
-static Mutex g_ic_lock;
-static uintptr_t g_ic_page;   /* 0: not set up yet, 1: unavailable */
-static int g_ic_x;            /* the page's current permission includes X */
-
-static int ic_page_init(void) {
-  Handle self = dcr_self_process();
-  void *src = memalign(PAGE, PAGE); /* donated to the mapping: never freed */
-  if (self == INVALID_HANDLE || !src)
-    return -1;
-  memset(src, 0, PAGE);
-  virtmemLock();
-  void *dst = virtmemFindCodeMemory(PAGE, PAGE);
-  VirtmemReservation *rv = dst ? virtmemAddReservation(dst, PAGE) : NULL;
-  virtmemUnlock();
-  if (!rv)
-    return -1;
-  Result rc = svcMapProcessCodeMemory(self, (u64)(uintptr_t)dst, (u64)(uintptr_t)src, PAGE);
-  if (R_SUCCEEDED(rc))
-    rc = svcSetProcessMemoryPermission(self, (u64)(uintptr_t)dst, PAGE, Perm_R);
-  if (R_FAILED(rc)) {
-    debugPrintf("[jit] I-cache flip page: 0x%x -- JIT code may run stale bytes\n", rc);
-    return -1;
-  }
-  g_ic_page = (uintptr_t)dst;
-  g_ic_x = 0;
-  debugPrintf("[jit] I-cache maintenance: flip page at %p\n", dst);
-  return 0;
-}
-
-void dcr_icache_invalidate(void) {
-  if (dcr_is_emulator())
-    return; /* the emulator: dcr_code_flush remaps the arena pages instead */
-  mutexLock(&g_ic_lock);
-  if (!g_ic_page && ic_page_init() != 0)
-    g_ic_page = 1;
-  if (g_ic_page > 1) {
-    g_ic_x ^= 1;
-    Result rc = svcSetProcessMemoryPermission(CUR_PROCESS_HANDLE, (u64)g_ic_page, PAGE,
-                                              g_ic_x ? Perm_Rx : Perm_R);
-    if (R_FAILED(rc)) {
-      static int warned;
-      if (!warned++)
-        debugPrintf("[jit] I-cache flip failed: 0x%x\n", rc);
-      g_ic_x ^= 1;
-    }
-  }
-  mutexUnlock(&g_ic_lock);
-}
-
+/* Instruction-cache maintenance is the runtime's (code_flush.c: the flip
+ * page, proven here on hardware 2026-09-23); the JIT arena's ranges come back
+ * here through port_code_flush below: their writable view is elsewhere, and
+ * under an emulator the arena pages are remapped instead. */
 /* Make [code, code+size) -- just written -- safe to execute on every core. */
 /* Emulator: unmap and map back the arena pages [code, code+size) touches --
  * the one thing that makes Ryujinx drop its translations of them. A thread
@@ -641,14 +576,16 @@ void dcr_jit_emu_frame_end(void) {
 }
 uint32_t dcr_emu_jit_remaps(void) { return g_emu_remaps; }
 
-void dcr_code_flush(void *code, size_t size) {
-  if (!size)
-    return;
-  if (g_emu_backing && jit_contains(code)) {
+/* The runtime's dcr_code_flush asks here first: the arena's ranges are
+ * cleaned through their writable view (hardware) or remapped (emulator). */
+int port_code_flush(void *code, size_t size) {
+  if (!jit_contains(code))
+    return 0;
+  if (g_emu_backing) {
     emu_flush((uintptr_t)code, size);
-    return;
+    return 1;
   }
-  void *d = jit_contains(code) ? jit_rw(code) : code;
+  void *d = jit_rw(code);
   Result rc = svcFlushProcessDataCache(CUR_PROCESS_HANDLE, (u64)(uintptr_t)d, size);
   if (R_FAILED(rc)) {
     static int warned;
@@ -656,6 +593,7 @@ void dcr_code_flush(void *code, size_t size) {
       debugPrintf("[jit] data-cache flush of %p+0x%x failed: 0x%x\n", d, (unsigned)size, rc);
   }
   dcr_icache_invalidate();
+  return 1;
 }
 
 static volatile uint32_t g_jit_flushes;

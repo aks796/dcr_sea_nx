@@ -195,7 +195,7 @@ static void gc_restart(BThread *t) {
 }
 
 /* Called by bionic_signal.c for every tkill/pthread_kill. */
-int dcr_gc_signal(BThread *t, int sig) {
+int port_gc_signal(BThread *t, int sig) {
   if (!g_gc_ready || !t)
     return 0;
   if (sig == (int)DCR_MONO_GC_SUSPEND_SIG) {
@@ -266,6 +266,13 @@ void dcr_mono_log_managed_stack(const char *tag) {
   }
   if (!n)
     debugPrintf("%s no managed frames on this thread's stack\n", tag);
+}
+
+/* The runtime's signal delivery ends the process for a fatal signal (abort()
+ * in the game ends there); first, what Mono was running, by name. */
+void port_on_fatal_signal(int sig, BThread *t) {
+  (void)sig, (void)t;
+  dcr_mono_log_managed_stack("[fatal]");
 }
 
 /* The nearest `max` managed callers on this thread's stack, outside

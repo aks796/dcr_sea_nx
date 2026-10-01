@@ -41,7 +41,7 @@
 #include "bionic_pthread.h"
 #include "config.h"
 #include "dcr_path.h"
-#include "jni.h"
+#include "dcr_jni_unity.h"
 #include "so_util.h"
 #include "util.h"
 
@@ -565,4 +565,13 @@ jvalue jni_h_handler_removeCallbacks(JObj *self, const jvalue *a, const JMethod 
 jvalue jni_h_handler_getLooper(JObj *self, const jvalue *a, const JMethod *m) {
   return jv_l(handler_queue(self) == LOOPER_ENGINE && g_engine_looper ? g_engine_looper
                                                                        : jni_singleton("android/os/Looper"));
+}
+
+/* The runtime's JNI core asks here before its tables: an instance method
+ * called on a java.lang.reflect.Proxy goes to the proxy's handler. */
+int port_jni_invoke(JObj *self, JMethod *m, const jvalue *args, jvalue *out) {
+  if (m->is_static || !jni_is_proxy(self))
+    return 0;
+  *out = jni_proxy_call(self, m, args);
+  return 1;
 }

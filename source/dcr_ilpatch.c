@@ -2,7 +2,7 @@
  *
  * Unity reads Assembly-CSharp.dll out of the APK and hands the bytes to Mono
  * (mono_image_open_from_data_with_name / _full, looked up with dlsym, which
- * bionic_dl.c routes through dcr_icall_interpose). Before Mono sees them, a
+ * bionic_dl.c routes through port_import_interpose). Before Mono sees them, a
  * copy is patched. Every patch finds its methods by name in the assembly's
  * own metadata tables and checks the code instruction by instruction; code
  * that does not look exactly as expected is left alone and logged, never

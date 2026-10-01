@@ -63,13 +63,11 @@
 #include <switch.h>
 
 #include "dcr_input.h"
+#include "dcr_jni_unity.h"
 #include "dcr_time.h"
-#include "jni.h"
+#include "gl_layer.h"
+#include "rt_window.h"
 #include "util.h"
-
-void dcr_window_size(int *w, int *h);
-/* gl_mesa.c; nothing to capture with the null renderer */
-__attribute__((weak)) void dcr_gl_request_capture(void) {}
 
 #define AM_DOWN 0
 #define AM_UP 1

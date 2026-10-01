@@ -296,7 +296,7 @@ static void add_icall(const char *name, const void *fn) {
 void *dcr_ilpatch_interpose(const char *sym, void *real); /* dcr_ilpatch.c */
 
 /* bionic_dl.c: every dlsym into libmono passes through here. */
-void *dcr_icall_interpose(const char *sym, void *real) {
+void *port_import_interpose(const char *sym, void *real) {
   real = dcr_ilpatch_interpose(sym, real);
   if (real && !strcmp(sym, "mono_add_internal_call")) {
     g_real_add = (add_icall_fn)real;

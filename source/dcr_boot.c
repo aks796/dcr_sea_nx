@@ -40,10 +40,13 @@
 #include "dcr_path.h"
 #include "dcr_time.h"
 #include "error.h"
+#include "dcr_boost.h"
+#include "dcr_jni_unity.h"
 #include "gl_layer.h"
-#include "jni.h"
+#include "rt_applet.h"
 #include "so_util.h"
 #include "util.h"
+#include "watchdog.h"
 
 extern so_module main_mod, unity_mod, mono_mod;
 extern volatile int g_dcr_quit_requested;
@@ -87,14 +90,12 @@ static struct {
 } U;
 
 static void *g_thiz, *g_ctx, *g_surface;
-static volatile int g_running, g_focused = 1, g_focus_changed;
 static volatile uint64_t g_frames_done;
 
-/* For the watchdog (watchdog.c): frames completed, and whether we are in the
- * foreground (a paused engine is not hung). */
+/* For the watchdog (the runtime's watchdog.c): frames completed. Whether a
+ * pause is expected is the runtime's (rt_applet.c: focus, system screens). */
 uint64_t dcr_boot_frames(void) { return g_frames_done; }
-int dcr_boot_in_focus(void) { return g_focused; }
-void dcr_watchdog_start(void);
+void dcr_watch_counters(void); /* dcr_watch.c */
 
 static void *native(const char *name, int required) {
   void *p = jni_native(C_PLAYER, name);
@@ -106,37 +107,20 @@ static void *native(const char *name, int required) {
   return p;
 }
 
-/* ---------------------------------------------------------- applet focus */
-static AppletHookCookie g_hook;
-
-static void on_applet(AppletHookType type, void *param) {
-  if (type == AppletHookType_OnFocusState || type == AppletHookType_OnOperationMode) {
-    int focused = appletGetFocusState() == AppletFocusState_InFocus;
-    if (focused != g_focused) {
-      g_focused = focused;
-      g_focus_changed = 1;
-    }
-  }
+/* ---------------------------------------------------------- applet focus
+ * The runtime (rt_applet.c) takes the HOME menu and sleep messages, flushes
+ * the log and holds the clocks; the player is paused and resumed here. Both
+ * run from rt_applet_poll() in the frame loop, on this thread. */
+void port_focus_lost(void) {
+  if (U.focusChanged) U.focusChanged(g_jni_env, g_thiz, 0);
+  if (U.pause) U.pause(g_jni_env, g_thiz);
+  dcr_vsync_set_paused(1);
 }
 
-static void apply_focus(void) {
-  if (!g_focus_changed || !g_running)
-    return;
-  g_focus_changed = 0;
-  if (!g_focused) {
-    debugPrintf("[boot] focus lost: pausing\n");
-    log_flush_ring();
-    if (U.focusChanged) U.focusChanged(g_jni_env, g_thiz, 0);
-    if (U.pause) U.pause(g_jni_env, g_thiz);
-    dcr_vsync_set_paused(1);
-    dcr_time_suspend();
-  } else {
-    dcr_time_resume();
-    dcr_vsync_set_paused(0);
-    if (U.resume) U.resume(g_jni_env, g_thiz);
-    if (U.focusChanged) U.focusChanged(g_jni_env, g_thiz, 1);
-    debugPrintf("[boot] focus regained: resumed\n");
-  }
+void port_focus_gained(void) {
+  dcr_vsync_set_paused(0);
+  if (U.resume) U.resume(g_jni_env, g_thiz);
+  if (U.focusChanged) U.focusChanged(g_jni_env, g_thiz, 1);
 }
 
 /* ------------------------------------------------------------------ boot */
@@ -181,6 +165,7 @@ int dcr_boot_run(void) {
   jni_init();
   jni_looper_bind_engine(); /* this thread plays UnityMain: Handler() here posts to it */
   dcr_watchdog_start();     /* log flushing + hang reports from here on */
+  dcr_watch_counters();     /* JIT, signal and GC counters in its reports (dcr_watch.c) */
   if (load_engine() != 0 || resolve_natives() != 0)
     fatal_error("The engine did not start (see debug.log).\n\n"
                 "Check that libmain.so, libunity.so and libmono.so come from the same\n"
@@ -215,8 +200,8 @@ int dcr_boot_run(void) {
   debugPrintf("[boot] nativeRecreateGfxState(0, surface)\n");
   U.recreateGfxState(g_jni_env, g_thiz, 0, g_surface);
 
-  appletHook(&g_hook, on_applet, NULL);
-  g_running = 1;
+  /* The focus messages (HOME, sleep) are the runtime's from boot on
+   * (rt_applet.c); they reach the player from the frame loop. */
   if (U.resume) U.resume(g_jni_env, g_thiz);
   if (U.focusChanged) U.focusChanged(g_jni_env, g_thiz, 1);
 
@@ -224,8 +209,8 @@ int dcr_boot_run(void) {
   debugPrintf("[boot] entering the frame loop\n");
   uint64_t frames = 0;
   while (appletMainLoop() && !g_dcr_quit_requested) {
-    apply_focus();
-    if (!g_focused) {
+    rt_applet_poll();
+    if (!rt_focused()) {
       svcSleepThread(50000000ll);
       continue;
     }
@@ -310,8 +295,7 @@ int dcr_boot_run(void) {
   debugPrintf("[boot] leaving the frame loop after %llu frames\n", (unsigned long long)frames);
   log_set_quiet(0);
   log_flush_ring();
-  g_running = 0;
-  appletUnhook(&g_hook);
+  rt_applet_stop();
   if (U.pause) U.pause(g_jni_env, g_thiz);
   dcr_vsync_stop();
   if (U.done) U.done(g_jni_env, g_thiz);

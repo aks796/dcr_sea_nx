@@ -12,10 +12,9 @@ void *jit_rw(const void *rx);                /* RX address -> writable alias */
 int jit_is_split(void);                      /* rx != rw (hardware) */
 void jit_flush(void *code, int size);        /* mono_arch_flush_icache */
 
-/* Instruction-cache maintenance for a 32-bit process (see jit_arena.c):
- * libnx32's armICacheInvalidate is a no-op, so use these for any code written
- * at run time. */
-void dcr_icache_invalidate(void);            /* every core, whole I-cache */
-void dcr_code_flush(void *code, size_t size); /* clean D-cache + invalidate I */
+/* Instruction-cache maintenance: the runtime's code_flush.h
+ * (dcr_code_flush, dcr_icache_invalidate); the arena's ranges go through
+ * port_code_flush in jit_arena.c. */
+#include "code_flush.h"
 
 #endif

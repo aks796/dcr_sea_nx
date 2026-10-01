@@ -1,5 +1,9 @@
-/* bionic_mem.c -- mmap and friends for the bionic ABI, plus the JIT-aware
- * memory primitives.
+/* dcr_jit_mem.c -- mmap and friends, and the JIT-aware memory primitives:
+ * Disney Crossy Road's replacements for the runtime's weak b_mmap, b_munmap,
+ * b_mremap, b_mprotect, b_mmap_bytes and b_memcpy / b_memmove / b_memset
+ * (runtime/source/bionic_mem.c keeps the __aeabi_ and _chk forms, which call
+ * these). Mono's code manager maps its code with PROT_EXEC, and that memory
+ * is the JIT arena, with an executable view and a writable one.
  *
  * There is no virtual memory API for applications beyond the heap, so:
  *   - anonymous mappings are page-aligned heap blocks (zeroed);
@@ -190,7 +194,6 @@ int b_mprotect(void *addr, size_t len, int prot) {
   return 0;
 }
 
-int b_madvise(void *addr, size_t len, int advice) { return 0; }
 
 u64 b_mmap_bytes(void) { return g_mapped_bytes; }
 
@@ -212,18 +215,3 @@ void *b_memset(void *d, int c, size_t n) {
     return memset(jit_rw(d), c, n), d;
   return memset(d, c, n);
 }
-
-/* ARM EABI helpers. NB __aeabi_memset's argument order is (dest, n, c). */
-void b___aeabi_memcpy(void *d, const void *s, size_t n) { b_memcpy(d, s, n); }
-void b___aeabi_memmove(void *d, const void *s, size_t n) { b_memmove(d, s, n); }
-void b___aeabi_memset(void *d, size_t n, int c) { b_memset(d, c, n); }
-void b___aeabi_memclr(void *d, size_t n) { b_memset(d, 0, n); }
-/* The 4/8 variants only promise alignment; same behaviour. */
-void b___aeabi_memcpy4(void *d, const void *s, size_t n) __attribute__((alias("b___aeabi_memcpy")));
-void b___aeabi_memcpy8(void *d, const void *s, size_t n) __attribute__((alias("b___aeabi_memcpy")));
-void b___aeabi_memmove4(void *d, const void *s, size_t n) __attribute__((alias("b___aeabi_memmove")));
-void b___aeabi_memmove8(void *d, const void *s, size_t n) __attribute__((alias("b___aeabi_memmove")));
-void b___aeabi_memset4(void *d, size_t n, int c) __attribute__((alias("b___aeabi_memset")));
-void b___aeabi_memset8(void *d, size_t n, int c) __attribute__((alias("b___aeabi_memset")));
-void b___aeabi_memclr4(void *d, size_t n) __attribute__((alias("b___aeabi_memclr")));
-void b___aeabi_memclr8(void *d, size_t n) __attribute__((alias("b___aeabi_memclr")));

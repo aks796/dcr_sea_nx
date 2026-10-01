@@ -34,7 +34,7 @@
 #include "dcr_path.h"
 #include "dcr_prefs.h"
 #include "dcr_time.h"
-#include "jni.h"
+#include "dcr_jni_unity.h"
 #include "util.h"
 
 void dcr_window_size(int *w, int *h);   /* android_ndk.c */
